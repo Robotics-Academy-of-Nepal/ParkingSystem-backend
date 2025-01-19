@@ -32,21 +32,22 @@ ALLOWED_HOSTS = []
 # Application definition
 
 SHARED_APPS = [
-    'django_tenants',
-    'tenant',
-    'corsheaders',
-    'rest_framework',
-    'rest_framework_simplejwt',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django_tenants',
+    'tenant',
+    'corsheaders',
+    'rest_framework',
+    'rest_framework_simplejwt',
+    'django_celery_beat',
 ]
 
 TENANT_APPS=[
-    'django.contrib.admin',
     'tenant_app',
+    'django.contrib.admin',
 ]
 
 INSTALLED_APPS = SHARED_APPS + [app for app in TENANT_APPS if app not in SHARED_APPS]
@@ -202,4 +203,18 @@ SIMPLE_JWT = {
     'BLACKLIST_AFTER_ROTATION': True,                 
     'ALGORITHM': 'HS256',
     'SIGNING_KEY': SECRET_KEY,                        
+}
+
+
+CELERY_BROKER_URL = 'redis://localhost:6379/0'  # Replace with your Redis broker URL
+CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'  # For storing task results (optional)
+
+from celery import Celery
+from celery.schedules import crontab
+# Optional: Schedule for periodic tasks
+CELERY_BEAT_SCHEDULE = {
+    'refresh-passcodes-daily': {
+        'task': 'tenant_app.tasks.refresh_passcodes',
+        'schedule': crontab(minute=0, hour=0),  # Runs at midnight every day
+    },
 }

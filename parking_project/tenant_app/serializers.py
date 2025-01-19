@@ -16,3 +16,8 @@ class UserSerializer(serializers.ModelSerializer):
         user.set_password(password)
         user.save()
         return user
+    
+class BaseRateSerializer(serializers.Serializer):
+    two_wheeler_rate = serializers.DecimalField(max_digits=10,decimal_places=2,required=False)
+    four_wheeler_rate = serializers.DecimalField(max_digits=10,decimal_places=2,required=False)
+    heavy_vehicle_rate = serializers.DecimalField(max_digits=10,decimal_places=2,required=False)
