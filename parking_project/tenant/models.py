@@ -19,7 +19,7 @@ class Client(TenantMixin):
     def set_passcode(self):
         """Generate a passcode using UUID and set its expiration."""
         # Generate a passcode using UUID (v4)
-        self.passcode_code = str(uuid.uuid4())[:8]  # Take the first 8 characters of the UUID
+        self.passcode = generate_passcode() # Take the first 8 characters of the UUID
         # self.passcode_expires_at = timezone.now() + timedelta(day=1)
         self.passcode_expires_at = date.today() + timedelta(days=1)
         self.save()

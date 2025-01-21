@@ -8,11 +8,8 @@ class TenantAPIView(APIView):
         Extract tenant schema from the request. 
         Example: Extract tenant schema from subdomain.
         """
-        subdomain = request.get_host().split(':')[0]  # Get host without port
-        try:
-            # Get tenant schema by subdomain
-            domain = Domain.objects.get(domain=subdomain)
-            tenant = Client.objects.get(id=domain.tenant_id)
-            return tenant.schema_name  # Assuming `Client` model has `schema_name`
-        except Client.DoesNotExist:
-            raise Http404("Tenant not found")
+        # subdomain = request.tenant # Get host without port
+        subdomain = request.META.get('HTTP_TENANT')
+        domain = Domain.objects.select_related('tenant').get(domain=subdomain)        
+        return domain.tenant.schema_name     
+      

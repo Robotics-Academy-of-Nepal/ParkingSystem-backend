@@ -26,7 +26,7 @@ SECRET_KEY = 'django-insecure-w=8sl)=@jy)sp81$qgp=y4$ru^4)=wc*-*1strwb2d)b78x9ci
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['*']
 
 
 # Application definition
@@ -41,20 +41,21 @@ SHARED_APPS = [
     'tenant',
     'corsheaders',
     'rest_framework',
-    'rest_framework_simplejwt',
-    'django_celery_beat',
+    
+    # 'rest_framework_simplejwt',
 ]
 
 TENANT_APPS=[
     'tenant_app',
     'django.contrib.admin',
+    'rest_framework.authtoken',
 ]
 
 INSTALLED_APPS = SHARED_APPS + [app for app in TENANT_APPS if app not in SHARED_APPS]
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'rest_framework.authentication.TokenAuthentication',
     ],
 }
 
@@ -139,7 +140,8 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Kathmandu'
+USE_TZ = True  # This enables timezone-aware datetimes
 
 USE_I18N = True
 
@@ -195,26 +197,14 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 
 
-# JWT Configuration for SimpleJWT
-SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30), 
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),     
-    'ROTATE_REFRESH_TOKENS': True,                    
-    'BLACKLIST_AFTER_ROTATION': True,                 
-    'ALGORITHM': 'HS256',
-    'SIGNING_KEY': SECRET_KEY,                        
-}
+# # JWT Configuration for SimpleJWT
+# SIMPLE_JWT = {
+#     'ACCESS_TOKEN_LIFETIME': timedelta(days=7), 
+#     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),     
+#     'ROTATE_REFRESH_TOKENS': True,                    
+#     'BLACKLIST_AFTER_ROTATION': True,                 
+#     'ALGORITHM': 'HS256',
+#     'SIGNING_KEY': SECRET_KEY,                        
+# }
 
 
-CELERY_BROKER_URL = 'redis://localhost:6379/0'  # Replace with your Redis broker URL
-CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'  # For storing task results (optional)
-
-from celery import Celery
-from celery.schedules import crontab
-# Optional: Schedule for periodic tasks
-CELERY_BEAT_SCHEDULE = {
-    'refresh-passcodes-daily': {
-        'task': 'tenant_app.tasks.refresh_passcodes',
-        'schedule': crontab(minute=0, hour=0),  # Runs at midnight every day
-    },
-}

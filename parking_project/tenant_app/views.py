@@ -12,86 +12,93 @@ from django_tenants.utils import schema_context
 from .models import *
 from rest_framework.permissions import IsAuthenticated
 from .permissions import IsSuperAdmin
-from .services.passcode_service import PasscodeService
-# Create your views here.
-class LoginAPIView(TenantAPIView):
-    def post(self, request):
-        # Get the username and password from the request data
+from django.db import transaction
+from rest_framework.viewsets import ViewSet
+from rest_framework.decorators import action
+from rest_framework.authtoken.models import Token
+
+
+class UserViewSet(ViewSet):
+    @action(detail=False, methods=['POST'], url_path='login')
+    def login(selg,request):
         username = request.data.get('username')
         password = request.data.get('password')
         print(request.data)
         print("view",username)
         print("view",password)
         # Authenticate the user 
-        tenant_auth_backend = TenantAuthBackend()
-        user = tenant_auth_backend.authenticate(request,username=username, password=password)
+        user = authenticate(request,username=username, password=password)
         print("view",user)
+        serializer=UserSerializer(user)
         # Check if authentication was successful
         if user and user.is_superadmin():  # Check if its superadmin
-            # Generate JWT tokens
-            refresh = RefreshToken.for_user(user)
-            access_token = refresh.access_token
-
-            return Response({
-                'refresh': str(refresh),
-                'access': str(access_token),
-                'is_superadmin': True
-            }, status=status.HTTP_200_OK)
-        elif user: #for users other than superadmin
-            # Generate JWT tokens
-            refresh = RefreshToken.for_user(user)
-            access_token = refresh.access_token
-
-            return Response({
-                'refresh': str(refresh),
-                'access': str(access_token),
-                'is_superadmin': False
-            }, status=status.HTTP_200_OK)
-            
-            
-            
+            # Generate token
+            token, created = Token.objects.get_or_create(user=user)
+            return Response(
+                {
+                    'token': token.key,
+                    'is_superadmin': True,
+                    'user': serializer.data,
+                },
+                status=status.HTTP_200_OK
+            )
+        elif user:  # for users other than superadmin
+            # Generate token
+            token, created = Token.objects.get_or_create(user=user)
+            return Response(
+                {
+                    'token': token.key,
+                    'is_superadmin': False,
+                    'user': serializer.data,
+                },
+                status=status.HTTP_200_OK
+            )
         # Return error if authentication fails
-        return Response({
-            'error': 'Invalid credentials'
-        }, status=status.HTTP_401_UNAUTHORIZED)
-        
-class CreateUserView(TenantAPIView):
-    def post(self, request):
-        # Extract tenant schema (e.g., from subdomain or request headers)
+        return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
+
+
+    @action(detail=False, methods=['POST'], url_path='create-user', permission_classes=[IsAuthenticated, IsSuperAdmin])
+    def create_user(self, request):
         tenant_schema = self.get_tenant_schema_from_request(request)
 
         if not tenant_schema:
             return Response({"detail": "Tenant not found."}, status=status.HTTP_400_BAD_REQUEST)
         
-        # Switch to tenant schema and create the user
         with schema_context(tenant_schema):
             serializer = UserSerializer(data=request.data)
             if serializer.is_valid():
-                serializer.save()  # This saves the user in the current tenant schema
+                serializer.save()
                 return Response(serializer.data, status=status.HTTP_201_CREATED)
-            
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    
-        
-class UserListView(TenantAPIView):
-    permission_classes = [IsAuthenticated, IsSuperAdmin]  # Enforce authentication and custom permission
-    def get(self, request):
-        # Extract tenant schema (e.g., from subdomain or request headers)
-        tenant_schema = self.get_tenant_schema_from_request(request)
+    @action(detail=False, methods=['GET'], url_path='get-user-info')
+    def get_user_info(self, request):
+        token = self.request.headers.get('Authorization').split(' ')[1]
+        user = Token.objects.get(key=token).user
+        serializer = UserSerializer(user)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
-        if not tenant_schema:
-            return Response({"detail": "Tenant not found."}, status=status.HTTP_400_BAD_REQUEST)
+    @action(detail=False, methods=['GET'], url_path='list-users', permission_classes=[IsAuthenticated, IsSuperAdmin])
+    def list_users(self, request):
+        # tenant_schema = self.get_tenant_schema_from_request(request)
+
+        # if not tenant_schema:
+        #     return Response({"detail": "Tenant not found."}, status=status.HTTP_400_BAD_REQUEST)
         
-        # Switch to tenant schema and fetch users
-        with schema_context(tenant_schema):
-            users = User.objects.filter(role="STAFF")  # Query users in the current tenant schema
-            serializer = UserSerializer(users, many=True)
-            return Response(serializer.data)
-        
+        # with schema_context(tenant_schema):
+        users = User.objects.filter(role="STAFF")
+        serializer = UserSerializer(users, many=True)
+        return Response(serializer.data)
+
+    def get_tenant_schema_from_request(self, request):
+        # subdomain = request.tenant # Get host without port
+        subdomain = request.META.get('HTTP_TENANT')
+        domain = Domain.objects.select_related('tenant').get(domain=subdomain)        
+        return domain.tenant.schema_name     
     
 
 class ChangeBaseRateView(TenantAPIView):
+    permission_classes = [IsAuthenticated]  # Ensure only superadmins can access this view
     def post(self,request):
         serializer=BaseRateSerializer(data=request.data)
         if serializer.is_valid():
@@ -109,6 +116,8 @@ class ChangeBaseRateView(TenantAPIView):
                 #validate the passcode
                 try:
                     tenant=Client.objects.get(schema_name=tenant_schema)
+                    if not tenant.is_passcode_valid():
+                       return Response({"detail": "passcode expired."}, status=status.HTTP_400_BAD_REQUEST)
                     # Check if the passcode matches
                     if tenant.passcode != passcode:
                         return Response({"detail": "Invalid passcode."}, status=status.HTTP_400_BAD_REQUEST)
@@ -132,6 +141,7 @@ class ChangeBaseRateView(TenantAPIView):
     def get(self,request):
         tenant_schema=self.get_tenant_schema_from_request(request)
         
+        print(tenant_schema)
         if not tenant_schema:
             return Response({"detail":"Tenant not found."},status=status.HTTP_400_BAD_REQUEST)
         
@@ -188,3 +198,89 @@ class RefreshPasscodeView(TenantAPIView):
             
             except Exception as e:
                 return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            
+            
+class CheckinView(TenantAPIView):
+    permission_classes = [IsAuthenticated]  # Ensure only authenticated users can access this view
+
+    def post(self, request):
+        # Validate incoming data with the serializer
+        serializer = ParkingDetailsSerializer(data=request.data)
+        
+        if serializer.is_valid():
+            # Extract validated data
+            receipt_id = serializer.validated_data.get('receipt_id')
+            vehicle_number = serializer.validated_data.get('vehicle_number')
+            vehicle_type = serializer.validated_data.get('vehicle_type')
+            checkin_time = serializer.validated_data.get('checkin_time')
+            checkedin_by = serializer.validated_data.get('checkedin_by').id
+            
+            # Get tenant schema from request
+            tenant_schema = self.get_tenant_schema_from_request(request)
+            
+            # Check if tenant schema exists
+            if not tenant_schema:
+                return Response({"detail": "Tenant not found."}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Ensure checkedin_by is a valid user
+            try:
+                user = User.objects.get(id=checkedin_by)
+            except User.DoesNotExist:
+                return Response({"detail": "User doesn't exist."}, status=status.HTTP_404_NOT_FOUND)
+
+            # Use schema context for the tenant-specific database operations
+            with schema_context(tenant_schema):
+                try:
+                    # Use transaction to ensure atomic operations
+                    with transaction.atomic():
+                        # Create the parking details entry
+                        checkin_details = ParkingDetails.objects.create(
+                            receipt_id=receipt_id,
+                            vehicle_number=vehicle_number,
+                            vehicle_type=vehicle_type,
+                            checkin_time=checkin_time,
+                            checkedin_by=user
+                        )
+                        
+                        # Return a success response with created data
+                        return Response(
+                            {"detail": "Check-in successful", "data": ParkingDetailsSerializer(checkin_details).data},
+                            status=status.HTTP_201_CREATED
+                        )
+                except Exception as e:
+                    return Response({"detail": f"Error creating check-in: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        else:
+            # Return validation errors if serializer is not valid
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        
+class CheckoutView(TenantAPIView):
+    permission_classes = [IsAuthenticated]  # Ensure only authenticated users can access this view
+
+    def post(self, request):
+        
+        receipt_id = request.data.get("receipt_id")
+        
+        tenant_schema = self.get_tenant_schema_from_request(request)
+
+        if not tenant_schema:
+            return Response({"detail": "Tenant not found."}, status=status.HTTP_400_BAD_REQUEST)
+
+        with schema_context(tenant_schema):
+            try:
+                # Fetch the existing parking details by receipt number
+                parking_details = ParkingDetails.objects.get(receipt_id=receipt_id)
+                print(parking_details)
+                if parking_details.checkout_time:
+                    return Response({"detail": "Vehicle already checked out."}, status=status.HTTP_400_BAD_REQUEST)
+            except ValidationError as e:
+                 # Handle validation errors and send them to the frontend
+                return Response({"error": e.message_dict}, status=status.HTTP_400_BAD_REQUEST)
+            except Exception as e:
+                return Response({"detail": "Parking details not found."}, status=status.HTTP_404_NOT_FOUND)
+            # Pass the existing instance to the serializer for updating
+            serializer = ParkingDetailsSerializer(parking_details, data=request.data, partial=True)
+            if serializer.is_valid():
+                serializer.save()  # Save the updated instance
+                return Response({"detail": "Checkout successful","data":serializer.data}, status=status.HTTP_200_OK)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
