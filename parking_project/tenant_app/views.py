@@ -28,41 +28,43 @@ local_tz = timezone('Asia/Kathmandu')
 
 class UserViewSet(ViewSet):
     @action(detail=False, methods=['POST'], url_path='login')
-    def login(selg,request):
+    def login(self,request):
         username = request.data.get('username')
         password = request.data.get('password')
         print(request.data)
         print("view",username)
         print("view",password)
-        # Authenticate the user 
-        user = authenticate(request,username=username, password=password)
-        print("view",user)
-        serializer=UserSerializer(user)
-        # Check if authentication was successful
-        if user and user.is_superadmin():  # Check if its superadmin
-            # Generate token
-            token, created = Token.objects.get_or_create(user=user)
-            return Response(
-                {
-                    'token': token.key,
-                    'is_superadmin': True,
-                    'user': serializer.data,
-                },
-                status=status.HTTP_200_OK
-            )
-        elif user:  # for users other than superadmin
-            # Generate token
-            token, created = Token.objects.get_or_create(user=user)
-            return Response(
-                {
-                    'token': token.key,
-                    'is_superadmin': False,
-                    'user': serializer.data,
-                },
-                status=status.HTTP_200_OK
-            )
-        # Return error if authentication fails
-        return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
+        tenant_schema=self.get_tenant_schema_from_request(request)
+        with tenant_schema(tenant_schema):
+            # Authenticate the user 
+            user = authenticate(request,username=username, password=password)
+            print("view",user)
+            serializer=UserSerializer(user)
+            # Check if authentication was successful
+            if user and user.is_superadmin():  # Check if its superadmin
+                # Generate token
+                token, created = Token.objects.get_or_create(user=user)
+                return Response(
+                    {
+                        'token': token.key,
+                        'is_superadmin': True,
+                        'user': serializer.data,
+                    },
+                    status=status.HTTP_200_OK
+                )
+            elif user:  # for users other than superadmin
+                # Generate token
+                token, created = Token.objects.get_or_create(user=user)
+                return Response(
+                    {
+                        'token': token.key,
+                        'is_superadmin': False,
+                        'user': serializer.data,
+                    },
+                    status=status.HTTP_200_OK
+                )
+            # Return error if authentication fails
+            return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
 
 
     @action(detail=False, methods=['POST'], url_path='create-user', permission_classes=[IsAuthenticated, IsSuperAdmin])
