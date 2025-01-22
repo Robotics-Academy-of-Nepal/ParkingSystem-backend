@@ -35,7 +35,7 @@ class UserViewSet(ViewSet):
         print("view",username)
         print("view",password)
         tenant_schema=self.get_tenant_schema_from_request(request)
-        with tenant_schema(tenant_schema):
+        with schema_context(tenant_schema):
             # Authenticate the user 
             user = authenticate(request,username=username, password=password)
             print("view",user)
