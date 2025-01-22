@@ -7,6 +7,7 @@ class IsSuperAdmin(BasePermission):
     """
     def has_permission(self, request, view):
         schema_name = self.get_tenant_schema_from_request(request)
+        print(schema_name)
         with schema_context(schema_name):
             # Check if the user is authenticated and is a superadmin
             return request.user.is_authenticated and request.user.role == "SUPERADMIN"
