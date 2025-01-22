@@ -164,6 +164,11 @@ TENANT_DOMAIN_MODEL='tenant.Domain'
 AUTH_USER_MODEL='tenant_app.User'
 
 
+# Allow specific domains
+CORS_ALLOWED_ORIGINS = [
+    "http://192.168.1.54",
+    "http://localhost:3000",
+]
 
 
 # Or allow all origins (not recommended for production)
@@ -185,6 +190,7 @@ CORS_ALLOW_METHODS = [
 CORS_ALLOW_HEADERS = [
     "content-type",
     "authorization",
+    "tenant",
 ]
 
 LOGIN_REDIRECT_URL = '/'
