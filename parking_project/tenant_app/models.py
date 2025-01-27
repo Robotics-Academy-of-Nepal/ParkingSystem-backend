@@ -30,8 +30,8 @@ class ParkingDetails(models.Model):
         ('HEAVY_VEHICLE','Heavy Vehicle')
     ]
     receipt_id=models.CharField(max_length=100,blank=False,null=False,unique=True)
-    vehicle_number=models.CharField(max_length=100,blank=False,null=False)
-    vehicle_type=models.CharField(max_length=100,choices=VEHICLE_TYPES,blank=False,null=False)
+    vehicle_number=models.CharField(max_length=100,blank=True,null=True)
+    vehicle_type=models.CharField(max_length=100,choices=VEHICLE_TYPES,blank=True,null=True)
     checkin_time=models.DateTimeField(default=now,blank=False,null=False)
     checkedin_by=models.ForeignKey(User,on_delete=models.CASCADE,blank=False,null=False,related_name='checked_in_parkings')
     checkout_time=models.DateTimeField(null=True,blank=True)
