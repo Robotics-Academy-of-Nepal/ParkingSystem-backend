@@ -1,0 +1,8 @@
+version: "3"
+agent:
+  authtoken: 2ojfatOtNrwHQ19jxVHEpTgIq8s_5b32Z4P6TvkzyF9Czs8qG
+tunnels:
+  backend:
+    addr: 8000
+    proto: http
+    domain: pegasus-distinct-snipe.ngrok-free.app
