@@ -26,7 +26,7 @@ SECRET_KEY = 'django-insecure-w=8sl)=@jy)sp81$qgp=y4$ru^4)=wc*-*1strwb2d)b78x9ci
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['parking.goodwish.com.np']
+ALLOWED_HOSTS = ['*']
 
 
 # Application definition
@@ -99,7 +99,7 @@ DATABASES = {
     'default': {
         'ENGINE': 'django_tenants.postgresql_backend',
         'NAME': 'parking_system',
-        'USER': 'parking_user',
+        'USER': 'postgres',
         'PASSWORD': 'postgres',
         'HOST': 'localhost',
         'PORT': 5432,        
@@ -167,6 +167,9 @@ AUTH_USER_MODEL='tenant_app.User'
 CORS_ALLOWED_ORIGINS = [
     "http://192.168.1.54",
     "http://localhost:3000",
+    
+
+
 ]
 
 
@@ -190,6 +193,7 @@ CORS_ALLOW_HEADERS = [
     "content-type",
     "authorization",
     "tenant",
+    "ngrok-skip-browser-warning",
 ]
 
 LOGIN_REDIRECT_URL = '/'
