@@ -16,5 +16,5 @@ urlpatterns = [
     path('refreshPasscode/', RefreshPasscodeView.as_view(), name='refresh-passcode'),
     path('checkin/', CheckinView.as_view(), name='checkin'),
     path('checkout/', CheckoutView.as_view(), name='checkout'),
-    # path('print/',PrintImageView.as_view(),name='print')
+    path('print/',PrintImageView.as_view(),name='print')
 ]
