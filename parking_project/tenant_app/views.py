@@ -29,6 +29,7 @@ from io import BytesIO
 from escpos.printer import Usb
 import usb.backend.libusb1 as libusb1
 
+
 local_tz = timezone('Asia/Kathmandu')
 
 
@@ -391,12 +392,34 @@ class CheckoutView(TenantAPIView):
 #         data = get_parking_data(days)
 #         return Response(data)
     
-
+# from django.utils import timezone
 
 class ParkingDetailsViewSet(ViewSet):
-    permission_classes = [IsAuthenticated,IsSuperAdmin]  # Ensure only authenticated users can access this view
+    permission_classes = [IsAuthenticated]  # Ensure only authenticated users can access this view
     
-    @action(detail=False, methods=['GET'], url_path='get-details')
+    @action(detail=False, methods=['GET'], url_path='get-all-details')
+    def get_all_details(self, request):
+        """
+        Fetch parking details for the current day from 8:00 AM to the current time.
+        """
+        # Get the current time
+        local_tz = timezone('Asia/Kathmandu')  # Replace with the timezone of your choice
+        now = datetime.now(local_tz)
+
+        # Calculate the start time (today at 8:00 AM)
+        start_time = now.replace(hour=8, minute=0, second=0, microsecond=0)
+        print(start_time)
+        # Fetch parking details within the time range
+        parking_data = ParkingDetails.objects.filter(
+            Q(checkin_time__gte=start_time, checkin_time__lte=now) |
+            Q(checkout_time__gte=start_time, checkout_time__lte=now)
+        ).order_by('checkin_time')  # Order by checkin_time for better readability
+
+        serializer = ParkingDetailsSerializer(parking_data, many=True)
+
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['GET'], url_path='get-details',permission_classes=[IsAuthenticated,IsSuperAdmin])
     def get_details(self, request):
         # Extract 'days' parameter from request query, default to 1 if not provided
         days = int(request.query_params.get('days', 1))  # Default to 1 day
@@ -415,7 +438,7 @@ class ParkingDetailsViewSet(ViewSet):
     Fetch parking data for graphs. Allows filtering based on days (1, 7, or 30).
     """
     # Extract 'days' parameter from request query, default to 1 if not provided
-    @action(detail=False, methods=['GET'], url_path='get-graph-details')
+    @action(detail=False, methods=['GET'], url_path='get-graph-details',permission_classes=[IsAuthenticated,IsSuperAdmin])
     def get_graph_details(self, request):
         days = int(request.query_params.get('days', 1))  # Default to 1 day
         print(f'days {days}')
@@ -624,3 +647,204 @@ class PrintImageView(TenantAPIView):
                 {"error": f"An unexpected error occurred: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+            
+from django.db import models
+from django_tenants.utils import schema_context
+import psycopg2
+from psycopg2 import sql
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
+
+class LocalToVMSyncService:
+    def __init__(self, tenant_domain):
+        self.tenant_domain = tenant_domain
+        self.tenant = None
+        self.models_to_sync = [User, ParkingDetails]  # Add AuthtokenToken to the list
+        self.sync_stats = {model.__name__: {'new': 0, 'existing': 0} for model in self.models_to_sync}
+
+        # VM Database connection settings
+        self.vm_db_settings = {
+            'dbname': 'parking_system',
+            'user': 'postgres',
+            'password': 'postgres',
+            'host': '4.194.252.240',
+            'port': '5432'
+        }
+
+    def test_vm_db_connection(self):
+        """Test the connection to the VM database."""
+        try:
+            conn = psycopg2.connect(**self.vm_db_settings)
+            conn.close()
+            return {
+                'status': 'success',
+                'message': 'Connection to VM database successful.'
+            }
+        except Exception as e:
+            return {
+                'status': 'error',
+                'message': f'Failed to connect to VM database: {str(e)}'
+            }
+
+    def get_tenant(self):
+        try:
+            print(self.tenant_domain)
+            domain = Domain.objects.get(domain=self.tenant_domain)
+            return domain.tenant
+            
+        except Client.DoesNotExist:
+            raise ValueError(f"No tenant found for domain: {self.tenant_domain}")
+
+    def connect_to_vm_db(self):
+        """Establish connection to VM database"""
+        try:
+            conn = psycopg2.connect(**self.vm_db_settings)
+            return conn
+        except Exception as e:
+            raise
+
+    def get_model_fields(self, model):
+        """Get field names for a model, excluding the primary key if it's not 'id'"""
+        return [field.name for field in model._meta.fields 
+                if field.name != 'id']
+
+    def get_local_data(self, model):
+        print("hello")
+        """Get data from local database for a model"""
+        fields = self.get_model_fields(model)
+        records = model.objects.all().values(*fields)
+        return list(records)
+
+    def sync_to_vm(self, model, local_records, schema_name):
+        """Sync local records to VM database using batch operations"""
+        if not local_records:
+            return
+        conn = self.connect_to_vm_db()
+        cursor = conn.cursor()
+        table_name = model._meta.db_table
+
+        try:
+            # Set search path to tenant schema
+            cursor.execute(f"SET search_path TO {schema_name}")
+            # Disable foreign key checks
+            cursor.execute("SET CONSTRAINTS ALL DEFERRED;")
+            cursor.execute("SET session_replication_role TO replica;")
+
+            # Prepare data for batch insert/update
+            fields = list(local_records[0].keys())
+            # Replace field names where necessary
+            for i, field in enumerate(fields):
+                if field == 'checkedout_by':
+                    fields[i] = 'checkedout_by_id'
+                elif field == 'checkedin_by':
+                    fields[i] = 'checkedin_by_id'
+
+            print(fields)
+            unique_fields = self.get_unique_fields(model)
+            # Construct the INSERT ... ON CONFLICT query
+            insert_query = sql.SQL("""
+                INSERT INTO {table} ({fields})
+                VALUES {values}
+                ON CONFLICT ({unique_fields}) DO UPDATE
+                SET {update_fields}
+            """).format(
+                table=sql.Identifier(table_name),
+                fields=sql.SQL(', ').join(map(sql.Identifier, fields)),
+                values=sql.SQL(', ').join([
+                    sql.SQL('({})').format(sql.SQL(', ').join(map(sql.Literal, record.values())))
+                    for record in local_records
+                ]),
+                unique_fields=sql.SQL(', ').join(map(sql.Identifier, unique_fields)),
+                update_fields=sql.SQL(', ').join([
+                    sql.SQL('{} = EXCLUDED.{}').format(sql.Identifier(field), sql.Identifier(field))
+                    for field in fields if field not in unique_fields
+                ])
+            )
+            # Execute the batch query
+            cursor.execute(insert_query)
+            conn.commit()
+
+            # Update sync stats
+            self.sync_stats[model.__name__]['new'] += len(local_records)
+
+        except Exception as e:
+            conn.rollback()
+            raise e
+        finally:
+            cursor.execute("SET session_replication_role TO DEFAULT;")
+            cursor.execute("SET CONSTRAINTS ALL IMMEDIATE;")
+            cursor.close()
+            conn.close()
+
+    def sync_all(self):
+        """Sync all models from local to VM database using batch operations"""
+        print("hello1")
+        try:
+            print("hello2")
+            self.tenant = self.get_tenant()
+            print("hello3")
+            with schema_context(self.tenant.schema_name):
+                for model in self.models_to_sync:
+                    # Get data from local database
+                    local_records = self.get_local_data(model)
+
+                    # Sync to VM database
+                    self.sync_to_vm(model, local_records, self.tenant.schema_name)
+
+            return {
+                'status': 'success',
+                'message': f'Data synchronized to VM database successfully for tenant: {self.tenant.schema_name}',
+                'stats': self.sync_stats
+            }
+
+        except Exception as e:
+            return {
+                'status': 'error',
+                'message': f'Sync failed: {str(e)}',
+                'stats': self.sync_stats
+            }
+
+    def get_unique_fields(self, model):
+        """Return unique identifying fields for each model"""
+        unique_fields = {
+            'User': ['username'],  # Use 'id' as the unique field for User
+            'ParkingDetails': ['receipt_id'],
+        }
+        return unique_fields.get(model.__name__, [])
+
+class DatabaseSyncView(APIView):
+    permission_classes = [IsAuthenticated, IsSuperAdmin]
+
+    def post(self, request):
+        tenant_domain = request.headers.get('tenant')
+        print(tenant_domain)
+        if not tenant_domain:
+            return Response(
+                {'error': 'Tenant header is required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        sync_service = LocalToVMSyncService(tenant_domain)
+        result = sync_service.sync_all()
+
+        if result['status'] == 'success':
+            return Response(result, status=status.HTTP_200_OK)
+        return Response(result, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def get(self, request):
+        """Test the connection to the VM database."""
+        tenant_domain = request.headers.get('tenant')
+        if not tenant_domain:
+            return Response(
+                {'error': 'Tenant header is required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        sync_service = LocalToVMSyncService(tenant_domain)
+        result = sync_service.test_vm_db_connection()
+
+        if result['status'] == 'success':
+            return Response(result, status=status.HTTP_200_OK)
+        return Response(result, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
